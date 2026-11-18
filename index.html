@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Тасктрекер</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+/* ===== НАСТРОЙКА СИНХРОНИЗАЦИИ =====
+   Заполните, чтобы веб и Telegram видели одни и те же данные.
+   Пусто = данные хранятся только в этом браузере (localStorage).
+   То же самое можно ввести в «Настройки → Синхронизация» (только для этого устройства). */
+window.TRACKER_CONFIG = {
+  supabaseUrl: "",      // например "https://abcd1234.supabase.co"
+  supabaseKey: "",      // anon public key из Project Settings → API
+  boardId: "main"       // имя доски; одинаковое на всех устройствах
+};
+</script>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --col:#ebecf0; --text:#172b4d; --muted:#6b778c;
+  --line:#dfe1e6; --accent:#2f6fed; --accent-text:#fff; --danger:#d93025; --ok:#1e8e3e; --warn:#e8710a;
+  --radius:10px; --shadow:0 1px 2px rgba(9,30,66,.2);
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#1d2125; --panel:#22272b; --col:#161a1d; --text:#dee4ea; --muted:#9fadbc; --line:#38414a; --shadow:0 1px 2px rgba(0,0,0,.5);}
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+header h1{font-size:17px;margin:0 8px 0 0}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{border:0;background:transparent;padding:6px 10px;border-radius:8px;cursor:pointer;color:var(--muted)}
+.tab.active{background:var(--col);color:var(--text);font-weight:600}
+.spacer{flex:1}
+.sync{font-size:12px;color:var(--muted)}
+.sync.err{color:var(--danger)}
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:8px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.btn.danger{color:var(--danger)}
+.btn.small{padding:3px 8px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+main{padding:12px 16px 40px}
+.sprintbar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-bottom:12px;color:var(--muted);font-size:14px}
+.sprintbar b{color:var(--text)}
+.progress{height:6px;width:160px;background:var(--col);border-radius:3px;overflow:hidden}
+.progress>i{display:block;height:100%;background:var(--ok)}
+.board{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));gap:12px;overflow-x:auto;padding-bottom:8px}
+.column{background:var(--col);border-radius:var(--radius);padding:8px;min-height:200px;display:flex;flex-direction:column}
+.column.over{outline:2px dashed var(--accent)}
+.column h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:4px 6px 8px;display:flex;justify-content:space-between}
+.cards{display:flex;flex-direction:column;gap:8px;flex:1}
+.card{background:var(--panel);border-radius:8px;box-shadow:var(--shadow);padding:9px 10px;cursor:pointer;user-select:none}
+.card.dragging{opacity:.4}
+.card .t{font-weight:500;word-break:break-word}
+.card .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:12px;color:var(--muted);align-items:center}
+.chip{background:var(--col);border-radius:10px;padding:1px 7px}
+.chip.late{background:#fde8e7;color:var(--danger)}
+.chip.soon{background:#fef0e1;color:var(--warn)}
+@media (prefers-color-scheme: dark){.chip.late{background:#4a1f1c}.chip.soon{background:#4a3218}}
+.card .mv{margin-left:auto;display:flex;gap:2px}
+.card .mv button{border:0;background:var(--col);border-radius:6px;width:26px;height:22px;cursor:pointer;color:var(--muted)}
+.addcard{margin-top:8px;border:0;background:transparent;color:var(--muted);text-align:left;padding:6px;border-radius:6px;cursor:pointer}
+.addcard:hover{background:rgba(127,127,127,.12)}
+.empty{color:var(--muted);font-size:13px;padding:6px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px}
+.panel h3{margin:0 0 10px;font-size:15px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);flex:1;min-width:160px}
+input,select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+textarea{min-height:110px;resize:vertical}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase}
+tr.click{cursor:pointer}
+tr.click:hover td{background:var(--col)}
+.badge{font-size:12px;padding:1px 8px;border-radius:10px;background:var(--col)}
+.badge.active{background:var(--accent);color:var(--accent-text)}
+.badge.closed{background:var(--ok);color:#fff}
+dialog{border:0;border-radius:12px;padding:0;width:min(560px,calc(100vw - 24px));background:var(--panel);color:var(--text);box-shadow:0 10px 40px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog form{padding:16px}
+dialog h3{margin:0 0 12px}
+.dlg-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
+.dlg-actions .left{margin-right:auto}
+.hint{font-size:12px;color:var(--muted)}
+.group-h{margin:16px 0 6px;font-size:14px;color:var(--muted)}
+@media (max-width:700px){
+  .board{grid-template-columns:1fr;overflow:visible}
+  .column{min-height:0}
+  main{padding:10px 12px 40px}
+  .hide-sm{display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Тасктрекер</h1>
+  <nav class="tabs">
+    <button class="tab active" data-view="board">Доска</button>
+    <button class="tab" data-view="done">Завершённые</button>
+    <button class="tab" data-view="settings">Настройки</button>
+  </nav>
+  <div class="spacer"></div>
+  <span class="sync" id="syncState"></span>
+</header>
+<main id="app"></main>
+
+<dialog id="taskDlg">
+  <form method="dialog" id="taskForm">
+    <h3 id="taskDlgTitle">Задача</h3>
+    <div class="row"><label class="f">Название<input name="title" required maxlength="200"></label></div>
+    <div class="row"><label class="f">Описание<textarea name="desc"></textarea></label></div>
+    <div class="row">
+      <label class="f">Исполнитель<input name="assignee" list="peopleList" maxlength="80"></label>
+      <label class="f">Срок<input name="due" type="date"></label>
+    </div>
+    <div class="row">
+      <label class="f">Статус<select name="status">
+        <option value="backlog">Бэклог</option><option value="todo">To Do</option>
+        <option value="progress">In Progress</option><option value="done">Done</option>
+      </select></label>
+      <label class="f">Спринт<select name="sprintId"></select></label>
+    </div>
+    <div class="hint" id="taskInfo"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn danger left" id="taskDelete">Удалить</button>
+      <button type="button" class="btn" id="taskCancel">Отмена</button>
+      <button type="submit" class="btn primary">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+<datalist id="peopleList"></datalist>
+
+<script>
+(() => {
+const COLS = [
+  {id:'backlog', name:'Бэклог'},
+  {id:'todo', name:'To Do'},
+  {id:'progress', name:'In Progress'},
+  {id:'done', name:'Done'}
+];
+const STATUS_NAME = Object.fromEntries(COLS.map(c=>[c.id,c.name]));
+const LS_DATA = 'tasktracker.data.v1';
+const LS_CONF = 'tasktracker.sync.v1';
+const LS_VIEW = 'tasktracker.view';
+
+const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
+if (tg) {
+  tg.ready(); tg.expand();
+  const p = tg.themeParams || {}, r = document.documentElement.style;
+  if (p.bg_color){ r.setProperty('--panel', p.bg_color); }
+  if (p.secondary_bg_color){ r.setProperty('--bg', p.secondary_bg_color); r.setProperty('--col', p.secondary_bg_color); }
+  if (p.text_color) r.setProperty('--text', p.text_color);
+  if (p.hint_color) r.setProperty('--muted', p.hint_color);
+  if (p.button_color) r.setProperty('--accent', p.button_color);
+  if (p.button_text_color) r.setProperty('--accent-text', p.button_text_color);
+}
+const tgUserName = tg && tg.initDataUnsafe && tg.initDataUnsafe.user
+  ? [tg.initDataUnsafe.user.first_name, tg.initDataUnsafe.user.last_name].filter(Boolean).join(' ') : '';
+
+// ---------- utils ----------
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const now = () => Date.now();
+const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); };
+const addDays = (iso, n) => { const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); };
+const fmtDate = iso => iso ? new Date(iso+'T00:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short'}) : '';
+const fmtDateFull = iso => iso ? new Date(iso+'T00:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}) : '';
+const fmtTs = ts => ts ? new Date(ts).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '';
+const daysBetween = (a, b) => Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00'))/86400000);
+
+// ---------- state ----------
+function emptyState(){
+  return { tasks:[], sprints:[], settings:{ sprintDays:14, updatedAt:0 } };
+}
+let state = loadLocal();
+function loadLocal(){
+  try { const s = JSON.parse(localStorage.getItem(LS_DATA)); if (s && s.tasks) return s; } catch(e){}
+  return emptyState();
+}
+function saveLocal(){ try { localStorage.setItem(LS_DATA, JSON.stringify(state)); } catch(e){} }
+
+const liveTasks = () => state.tasks.filter(t => !t.deleted);
+const liveSprints = () => state.sprints.filter(s => !s.deleted);
+const activeSprint = () => liveSprints().find(s => s.status === 'active') || null;
+const sprintById = id => state.sprints.find(s => s.id === id);
+
+function commit(){ saveLocal(); render(); Sync.push(); }
+
+function upsertTask(t){
+  t.updatedAt = now();
+  const i = state.tasks.findIndex(x => x.id === t.id);
+  if (i >= 0) state.tasks[i] = t; else state.tasks.push(t);
+}
+function setStatus(task, status){
+  const prev = task.status;
+  task.status = status;
+  if (status === 'backlog') task.sprintId = null;
+  else if (!task.sprintId) { const a = activeSprint(); task.sprintId = a ? a.id : null; }
+  if (status === 'done' && prev !== 'done') task.doneAt = now();
+  if (status !== 'done') task.doneAt = null;
+  task.order = now();
+  upsertTask(task);
+}
+
+// ---------- merge (для синхронизации) ----------
+function mergeList(a = [], b = []){
+  const m = new Map();
+  for (const x of a) m.set(x.id, x);
+  for (const x of b){ const y = m.get(x.id); if (!y || (x.updatedAt||0) > (y.updatedAt||0)) m.set(x.id, x); }
+  return [...m.values()];
+}
+function mergeState(local, remote){
+  if (!remote) return local;
+  return {
+    tasks: mergeList(local.tasks, remote.tasks),
+    sprints: mergeList(local.sprints, remote.sprints),
+    settings: (remote.settings?.updatedAt||0) > (local.settings?.updatedAt||0) ? remote.settings : local.settings
+  };
+}
+
+// ---------- sync через Supabase ----------
+const Sync = (() => {
+  let conf = null, timer = null, pushing = false, pending = false, lastErr = '', lastOk = 0;
+  function readConf(){
+    let o = {};
+    try { o = JSON.parse(localStorage.getItem(LS_CONF)) || {}; } catch(e){}
+    const c = Object.assign({}, window.TRACKER_CONFIG || {}, Object.fromEntries(Object.entries(o).filter(([,v]) => v)));
+    c.supabaseUrl = (c.supabaseUrl||'').replace(/\/+$/,'');
+    return (c.supabaseUrl && c.supabaseKey) ? c : null;
+  }
+  const headers = () => ({ apikey: conf.supabaseKey, Authorization: 'Bearer ' + conf.supabaseKey, 'Content-Type':'application/json' });
+  async function fetchRemote(){
+    const r = await fetch(`${conf.supabaseUrl}/rest/v1/boards?id=eq.${encodeURIComponent(conf.boardId||'main')}&select=data`, { headers: headers() });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0,120));
+    const rows = await r.json();
+    return rows[0] ? rows[0].data : null;
+  }
+  async function writeRemote(data){
+    const r = await fetch(`${conf.supabaseUrl}/rest/v1/boards?on_conflict=id`, {
+      method:'POST', headers: Object.assign(headers(), { Prefer:'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify({ id: conf.boardId||'main', data, updated_at: new Date().toISOString() })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0,120));
+  }
+  function status(){
+    const el = $('#syncState'); if (!el) return;
+    el.classList.toggle('err', !!lastErr);
+    if (!conf) el.textContent = 'Локально (без синхронизации)';
+    else if (lastErr) el.textContent = 'Ошибка синхронизации';
+    else if (pushing) el.textContent = 'Синхронизация…';
+    else el.textContent = lastOk ? 'Синхронизировано ' + new Date(lastOk).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : 'Подключение…';
+    el.title = lastErr;
+  }
+  // pull + merge + push: без потери чужих изменений
+  async function cycle(){
+    if (!conf) return;
+    if (pushing){ pending = true; return; }
+    pushing = true; status();
+    try {
+      const remote = await fetchRemote();
+      const before = JSON.stringify(state);
+      const merged = mergeState(state, remote);
+      const changedLocal = JSON.stringify(merged) !== before;
+      state = merged; saveLocal();
+      if (changedLocal) render();
+      if (!remote || canon(merged) !== canon(remote)) await writeRemote(merged);
+      lastErr = ''; lastOk = now();
+    } catch(e){ lastErr = String(e.message || e); }
+    pushing = false; status();
+    if (pending){ pending = false; cycle(); }
+  }
+  const byId = l => (l||[]).slice().sort((a,b) => a.id < b.id ? -1 : 1);
+  const canon = d => JSON.stringify([byId(d.tasks), byId(d.sprints), d.settings||{}]);
+  function start(){
+    conf = readConf(); lastErr = ''; lastOk = 0;
+    clearInterval(timer);
+    status();
+    if (!conf) return;
+    cycle();
+    timer = setInterval(() => { if (!document.hidden) cycle(); }, 15000);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) cycle(); });
+  return { start, push: cycle, status, readConf, get error(){ return lastErr; } };
+})();
+
+// ---------- render ----------
+let view = (() => { try { return localStorage.getItem(LS_VIEW) || 'board'; } catch(e){ return 'board'; } })();
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
+  view = b.dataset.view; try { localStorage.setItem(LS_VIEW, view); } catch(e){}
+  render();
+}));
+
+function render(){
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  const app = $('#app');
+  if (view === 'board') app.innerHTML = renderBoard();
+  else if (view === 'done') app.innerHTML = renderDone();
+  else app.innerHTML = renderSettings();
+  bind(app);
+  updatePeople();
+  Sync.status();
+}
+
+function dueChip(t){
+  if (!t.due) return '';
+  if (t.status === 'done') return `<span class="chip">📅 ${fmtDate(t.due)}</span>`;
+  const d = daysBetween(todayISO(), t.due);
+  const cls = d < 0 ? 'late' : d <= 2 ? 'soon' : '';
+  return `<span class="chip ${cls}" title="${d<0?'Просрочено':''}">📅 ${fmtDate(t.due)}</span>`;
+}
+function cardHTML(t){
+  const idx = COLS.findIndex(c => c.id === t.status);
+  return `<div class="card" draggable="true" data-id="${t.id}">
+    <div class="t">${esc(t.title)}</div>
+    <div class="meta">
+      ${t.assignee ? `<span class="chip">👤 ${esc(t.assignee)}</span>` : ''}
+      ${dueChip(t)}
+      ${t.desc ? '<span title="Есть описание">≡</span>' : ''}
+      <span class="mv">
+        ${idx > 0 ? `<button data-move="-1" data-id="${t.id}" title="Влево">‹</button>` : ''}
+        ${idx < COLS.length-1 ? `<button data-move="1" data-id="${t.id}" title="Вправо">›</button>` : ''}
+      </span>
+    </div>
+  </div>`;
+}
+
+function renderBoard(){
+  const a = activeSprint();
+  const tasks = liveTasks();
+  const byCol = {backlog:[], todo:[], progress:[], done:[]};
+  for (const t of tasks){
+    if (t.status === 'backlog' || !t.sprintId) { if (t.status !== 'done') byCol.backlog.push(t); continue; }
+    if (a && t.sprintId === a.id) byCol[t.status].push(t);
+  }
+  for (const k in byCol) byCol[k].sort((x,y) => (x.order||0) - (y.order||0));
+  let bar;
+  if (a){
+    const total = byCol.todo.length + byCol.progress.length + byCol.done.length;
+    const pct = total ? Math.round(byCol.done.length / total * 100) : 0;
+    const left = daysBetween(todayISO(), a.end);
+    bar = `<div class="sprintbar">
+      <span>Спринт: <b>${esc(a.name)}</b></span>
+      <span>${fmtDate(a.start)} – ${fmtDate(a.end)}</span>
+      <span>${left >= 0 ? `осталось дней: <b>${left}</b>` : `<b style="color:var(--danger)">просрочен на ${-left} дн.</b>`}</span>
+      <span class="progress" title="${pct}%"><i style="width:${pct}%"></i></span><span>${byCol.done.length}/${total}</span>
+      <button class="btn small" data-act="close-sprint">Завершить спринт</button>
+    </div>`;
+  } else {
+    bar = `<div class="sprintbar"><span>Нет активного спринта.</span>
+      <button class="btn small primary" data-act="quick-sprint">Начать спринт</button>
+      <span class="hint">Без спринта задачи из To Do/In Progress/Done не показываются на доске.</span></div>`;
+  }
+  return bar + `<div class="board">${COLS.map(c => `
+    <section class="column" data-col="${c.id}">
+      <h2><span>${c.name}</span><span>${byCol[c.id].length}</span></h2>
+      <div class="cards">${byCol[c.id].map(cardHTML).join('') || '<div class="empty">Пусто</div>'}</div>
+      ${c.id !== 'done' ? `<button class="addcard" data-add="${c.id}">+ Добавить задачу</button>` : ''}
+    </section>`).join('')}</div>`;
+}
+
+let doneFilter = { q:'', sprint:'' };
+function renderDone(){
+  let list = liveTasks().filter(t => t.status === 'done');
+  const q = doneFilter.q.trim().toLowerCase();
+  if (q) list = list.filter(t => (t.title+' '+(t.desc||'')+' '+(t.assignee||'')).toLowerCase().includes(q));
+  if (doneFilter.sprint) list = list.filter(t => (t.sprintId||'') === (doneFilter.sprint === '_none' ? '' : doneFilter.sprint));
+  list.sort((a,b) => (b.doneAt||0) - (a.doneAt||0));
+  const groups = new Map();
+  for (const t of list){ const k = t.sprintId || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
+  const sprints = liveSprints().slice().sort((a,b) => b.start.localeCompare(a.start));
+  let html = `<div class="row">
+    <label class="f">Поиск<input id="doneQ" value="${esc(doneFilter.q)}" placeholder="Название, описание, исполнитель"></label>
+    <label class="f">Спринт<select id="doneSprint"><option value="">Все</option>
+      ${sprints.map(s => `<option value="${s.id}" ${doneFilter.sprint===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+      <option value="_none" ${doneFilter.sprint==='_none'?'selected':''}>Без спринта</option></select></label>
+  </div><div class="hint">Всего завершено: ${list.length}</div>`;
+  if (!list.length) return html + '<p class="empty">Завершённых задач пока нет.</p>';
+  for (const [sid, items] of groups){
+    const s = sprintById(sid);
+    html += `<div class="group-h">${s ? esc(s.name) + ` · ${fmtDate(s.start)} – ${fmtDate(s.end)}` : 'Без спринта'}</div>
+    <div class="panel" style="padding:4px 10px"><table><thead><tr><th>Задача</th><th class="hide-sm">Исполнитель</th><th class="hide-sm">Срок</th><th>Завершена</th></tr></thead><tbody>
+    ${items.map(t => `<tr class="click" data-open="${t.id}"><td>${esc(t.title)}</td><td class="hide-sm">${esc(t.assignee||'—')}</td><td class="hide-sm">${t.due?fmtDate(t.due):'—'}</td><td>${fmtTs(t.doneAt)}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  }
+  return html;
+}
+
+function renderSettings(){
+  const sp = liveSprints().slice().sort((a,b) => b.start.localeCompare(a.start));
+  const a = activeSprint();
+  const planned = sp.filter(s => s.status === 'planned');
+  const lastEnd = sp.length ? sp.reduce((m,s) => s.end > m ? s.end : m, sp[0].end) : null;
+  const nextStart = lastEnd && lastEnd >= todayISO() ? addDays(lastEnd, 1) : todayISO();
+  const conf = Sync.readConf();
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem(LS_CONF)) || {}; } catch(e){}
+  const count = id => liveTasks().filter(t => t.sprintId === id).length;
+  const countDone = id => liveTasks().filter(t => t.sprintId === id && t.status === 'done').length;
+  return `
+  <div class="panel"><h3>Спринты</h3>
+    <div class="row">
+      <label class="f">Длительность спринта, дней<input id="sprintDays" type="number" min="1" max="90" value="${state.settings.sprintDays}"></label>
+      <button class="btn" data-act="save-days" style="align-self:flex-end">Сохранить</button>
+    </div>
+    <div class="hint">Длительность используется для новых спринтов. Даты уже созданных спринтов можно изменить ниже.</div>
+  </div>
+  <div class="panel"><h3>Новый спринт</h3>
+    <div class="row">
+      <label class="f">Название<input id="nsName" value="Спринт ${sp.length + 1}"></label>
+      <label class="f">Начало<input id="nsStart" type="date" value="${nextStart}"></label>
+      <label class="f">Конец<input id="nsEnd" type="date" value="${addDays(nextStart, state.settings.sprintDays - 1)}"></label>
+    </div>
+    <div class="row"><button class="btn primary" data-act="create-sprint">Создать спринт</button>
+    ${!a ? '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="nsStartNow" checked style="width:auto"> сразу сделать активным</label>' : ''}</div>
+  </div>
+  <div class="panel"><h3>Управление спринтами</h3>
+    ${sp.length ? `<table><thead><tr><th>Спринт</th><th>Даты</th><th>Статус</th><th class="hide-sm">Задачи</th><th></th></tr></thead><tbody>
+    ${sp.map(s => `<tr>
+      <td><input data-sname="${s.id}" value="${esc(s.name)}" style="min-width:110px"></td>
+      <td><input type="date" data-sstart="${s.id}" value="${s.start}" style="margin-bottom:4px"><input type="date" data-send="${s.id}" value="${s.end}"></td>
+      <td><span class="badge ${s.status}">${{planned:'Запланирован',active:'Активный',closed:'Завершён'}[s.status]}</span></td>
+      <td class="hide-sm">${countDone(s.id)}/${count(s.id)}</td>
+      <td style="white-space:nowrap">
+        ${s.status === 'planned' && !a ? `<button class="btn small primary" data-start="${s.id}">Старт</button>` : ''}
+        ${s.status === 'active' ? `<button class="btn small" data-act="close-sprint">Завершить</button>` : ''}
+        ${s.status === 'closed' ? `<button class="btn small" data-reopen="${s.id}" ${a?'disabled':''}>Открыть снова</button>` : ''}
+        ${s.status !== 'active' ? `<button class="btn small danger" data-sdel="${s.id}">Удалить</button>` : ''}
+      </td></tr>`).join('')}</tbody></table>
+      <div class="row" style="margin-top:8px"><button class="btn" data-act="save-sprints">Сохранить изменения</button></div>` : '<p class="empty">Спринтов пока нет.</p>'}
+    <div class="hint">При завершении спринта незавершённые задачи переносятся в следующий запланированный спринт или в бэклог (на выбор). Выполненные остаются в архиве «Завершённые».</div>
+  </div>
+  <div class="panel"><h3>Синхронизация</h3>
+    <div class="hint" style="margin-bottom:8px">${conf ? 'Подключено к Supabase, доска «' + esc(conf.boardId||'main') + '».' : 'Сейчас данные хранятся только в этом браузере.'}
+      Чтобы веб и Telegram видели одни данные, пропишите параметры в начале index.html (действует для всех) или здесь (только для этого устройства).</div>
+    <div class="row">
+      <label class="f">Supabase URL<input id="cfUrl" value="${esc(saved.supabaseUrl||'')}" placeholder="${esc((window.TRACKER_CONFIG||{}).supabaseUrl||'https://xxxx.supabase.co')}"></label>
+      <label class="f">Anon key<input id="cfKey" value="${esc(saved.supabaseKey||'')}" placeholder="${(window.TRACKER_CONFIG||{}).supabaseKey?'задан в index.html':''}"></label>
+      <label class="f">ID доски<input id="cfBoard" value="${esc(saved.boardId||'')}" placeholder="${esc((window.TRACKER_CONFIG||{}).boardId||'main')}"></label>
+    </div>
+    <div class="row"><button class="btn" data-act="save-sync">Сохранить и подключиться</button>
+      <button class="btn" data-act="sync-now" ${conf?'':'disabled'}>Синхронизировать сейчас</button>
+      ${Sync.error ? `<span class="hint" style="color:var(--danger)">${esc(Sync.error)}</span>` : ''}</div>
+  </div>
+  <div class="panel"><h3>Данные</h3>
+    <div class="row">
+      <button class="btn" data-act="export">Экспорт в JSON</button>
+      <label class="btn">Импорт из JSON<input type="file" id="importFile" accept="application/json" hidden></label>
+    </div>
+    <div class="hint">Задач: ${liveTasks().length}, спринтов: ${sp.length}.</div>
+  </div>`;
+}
+
+// ---------- events ----------
+let dragId = null;
+function bind(app){
+  app.querySelectorAll('.card').forEach(c => {
+    c.addEventListener('click', e => { if (e.target.closest('[data-move]')) return; openTask(c.dataset.id); });
+    c.addEventListener('dragstart', e => { dragId = c.dataset.id; c.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); });
+    c.addEventListener('dragend', () => { c.classList.remove('dragging'); dragId = null; });
+  });
+  app.querySelectorAll('.column').forEach(col => {
+    col.addEventListener('dragover', e => { if (dragId){ e.preventDefault(); col.classList.add('over'); } });
+    col.addEventListener('dragleave', () => col.classList.remove('over'));
+    col.addEventListener('drop', e => {
+      e.preventDefault(); col.classList.remove('over');
+      const t = state.tasks.find(x => x.id === dragId); if (!t) return;
+      if (col.dataset.col !== 'backlog' && !activeSprint()) { alertMsg('Сначала начните спринт.'); return; }
+      setStatus(t, col.dataset.col); commit();
+    });
+  });
+  app.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    const t = state.tasks.find(x => x.id === b.dataset.id);
+    const i = COLS.findIndex(c => c.id === t.status) + Number(b.dataset.move);
+    if (COLS[i].id !== 'backlog' && !activeSprint()) { alertMsg('Сначала начните спринт.'); return; }
+    setStatus(t, COLS[i].id); commit();
+  }));
+  app.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.add !== 'backlog' && !activeSprint()) { alertMsg('Сначала начните спринт.'); return; }
+    openTask(null, b.dataset.add);
+  }));
+  app.querySelectorAll('[data-open]').forEach(r => r.addEventListener('click', () => openTask(r.dataset.open)));
+
+  const q = $('#doneQ', app);
+  if (q) q.addEventListener('input', () => { doneFilter.q = q.value; const pos = q.selectionStart; render(); const n = $('#doneQ'); n.focus(); n.setSelectionRange(pos,pos); });
+  const ds = $('#doneSprint', app);
+  if (ds) ds.addEventListener('change', () => { doneFilter.sprint = ds.value; render(); });
+
+  app.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => actions[b.dataset.act]()));
+  app.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => {
+    const s = sprintById(b.dataset.start); s.status = 'active'; s.updatedAt = now(); commit();
+  }));
+  app.querySelectorAll('[data-reopen]').forEach(b => b.addEventListener('click', () => {
+    const s = sprintById(b.dataset.reopen); s.status = 'active'; s.updatedAt = now(); commit();
+  }));
+  app.querySelectorAll('[data-sdel]').forEach(b => b.addEventListener('click', () => {
+    const s = sprintById(b.dataset.sdel);
+    if (!confirm(`Удалить «${s.name}»? Его задачи вернутся в бэклог (выполненные останутся в архиве без спринта).`)) return;
+    for (const t of liveTasks()) if (t.sprintId === s.id){ t.sprintId = null; if (t.status !== 'done') t.status = 'backlog'; t.updatedAt = now(); }
+    s.deleted = true; s.updatedAt = now(); commit();
+  }));
+  const imp = $('#importFile', app);
+  if (imp) imp.addEventListener('change', async () => {
+    const f = imp.files[0]; if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      if (!Array.isArray(data.tasks)) throw new Error('Неверный формат');
+      if (!confirm('Импорт объединит файл с текущими данными. Продолжить?')) return;
+      const stamp = now();
+      data.tasks.forEach(t => t.updatedAt = Math.max(t.updatedAt||0, stamp));
+      (data.sprints||[]).forEach(s => s.updatedAt = Math.max(s.updatedAt||0, stamp));
+      state = mergeState(state, data); commit();
+    } catch(e){ alertMsg('Не удалось импортировать: ' + e.message); }
+  });
+}
+
+function alertMsg(m){ if (tg && tg.showAlert) tg.showAlert(m); else alert(m); }
+
+const actions = {
+  'quick-sprint'(){
+    const n = liveSprints().length + 1, start = todayISO();
+    const planned = liveSprints().filter(s => s.status === 'planned').sort((a,b) => a.start.localeCompare(b.start))[0];
+    if (planned){ planned.status = 'active'; planned.updatedAt = now(); }
+    else state.sprints.push({ id: uid(), name: 'Спринт ' + n, start, end: addDays(start, state.settings.sprintDays - 1), status:'active', updatedAt: now() });
+    commit();
+  },
+  'close-sprint'(){
+    const a = activeSprint(); if (!a) return;
+    const open = liveTasks().filter(t => t.sprintId === a.id && t.status !== 'done');
+    const next = liveSprints().filter(s => s.status === 'planned').sort((x,y) => x.start.localeCompare(y.start))[0];
+    let toNext = false;
+    if (open.length){
+      if (next) toNext = confirm(`Незавершённых задач: ${open.length}.\nОК: перенести в «${next.name}» (и запустить его).\nОтмена: вернуть в бэклог.`);
+      else if (!confirm(`Завершить «${a.name}»? Незавершённые задачи (${open.length}) вернутся в бэклог.`)) return;
+    } else if (!confirm(`Завершить «${a.name}»?`)) return;
+    for (const t of open){
+      if (toNext){ t.sprintId = next.id; }
+      else { t.sprintId = null; t.status = 'backlog'; }
+      t.updatedAt = now();
+    }
+    a.status = 'closed'; a.closedAt = now(); a.updatedAt = now();
+    if (toNext){ next.status = 'active'; next.updatedAt = now(); }
+    commit();
+  },
+  'save-days'(){
+    const v = Math.max(1, Math.min(90, parseInt($('#sprintDays').value, 10) || 14));
+    state.settings = Object.assign({}, state.settings, { sprintDays: v, updatedAt: now() }); commit();
+  },
+  'create-sprint'(){
+    const name = $('#nsName').value.trim() || 'Спринт', start = $('#nsStart').value, end = $('#nsEnd').value;
+    if (!start || !end || end < start){ alertMsg('Проверьте даты спринта.'); return; }
+    const startNow = $('#nsStartNow') && $('#nsStartNow').checked;
+    state.sprints.push({ id: uid(), name, start, end, status: startNow ? 'active' : 'planned', updatedAt: now() });
+    commit();
+  },
+  'save-sprints'(){
+    for (const s of liveSprints()){
+      const n = $(`[data-sname="${s.id}"]`).value.trim(), st = $(`[data-sstart="${s.id}"]`).value, en = $(`[data-send="${s.id}"]`).value;
+      if (!st || !en || en < st){ alertMsg(`Проверьте даты «${s.name}».`); return; }
+      if (n !== s.name || st !== s.start || en !== s.end){ s.name = n || s.name; s.start = st; s.end = en; s.updatedAt = now(); }
+    }
+    commit();
+  },
+  'save-sync'(){
+    const o = { supabaseUrl: $('#cfUrl').value.trim(), supabaseKey: $('#cfKey').value.trim(), boardId: $('#cfBoard').value.trim() };
+    try { localStorage.setItem(LS_CONF, JSON.stringify(o)); } catch(e){}
+    Sync.start(); setTimeout(render, 1500);
+  },
+  'sync-now'(){ Sync.push().then(render); },
+  'export'(){
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `tasktracker-${todayISO()}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+};
+
+// ---------- task dialog ----------
+const dlg = $('#taskDlg'), form = $('#taskForm');
+let editing = null;
+function openTask(id, status){
+  const t = id ? state.tasks.find(x => x.id === id) : null;
+  editing = t ? t.id : null;
+  $('#taskDlgTitle').textContent = t ? 'Задача' : 'Новая задача';
+  const a = activeSprint();
+  const opts = ['<option value="">— без спринта (бэклог) —</option>']
+    .concat(liveSprints().filter(s => s.status !== 'closed' || (t && t.sprintId === s.id))
+      .sort((x,y) => x.start.localeCompare(y.start))
+      .map(s => `<option value="${s.id}">${esc(s.name)}${s.status==='active'?' (активный)':s.status==='closed'?' (завершён)':''}</option>`));
+  form.sprintId.innerHTML = opts.join('');
+  form.title.value = t ? t.title : '';
+  form.desc.value = t ? (t.desc||'') : '';
+  form.assignee.value = t ? (t.assignee||'') : (tgUserName || '');
+  form.due.value = t ? (t.due||'') : '';
+  form.status.value = t ? t.status : (status || 'backlog');
+  form.sprintId.value = t ? (t.sprintId||'') : (status && status !== 'backlog' && a ? a.id : '');
+  $('#taskDelete').style.display = t ? '' : 'none';
+  $('#taskInfo').textContent = t ? `Создана ${fmtTs(t.createdAt)}${t.doneAt ? ' · завершена ' + fmtTs(t.doneAt) : ''}` : '';
+  dlg.showModal();
+  if (!t) form.title.focus();
+}
+form.status.addEventListener('change', () => {
+  const a = activeSprint();
+  if (form.status.value === 'backlog') form.sprintId.value = '';
+  else if (!form.sprintId.value && a) form.sprintId.value = a.id;
+});
+form.sprintId.addEventListener('change', () => {
+  if (!form.sprintId.value) form.status.value = 'backlog';
+  else if (form.status.value === 'backlog') form.status.value = 'todo';
+});
+$('#taskCancel').addEventListener('click', () => dlg.close());
+$('#taskDelete').addEventListener('click', () => {
+  if (!editing || !confirm('Удалить задачу?')) return;
+  const t = state.tasks.find(x => x.id === editing);
+  t.deleted = true; t.updatedAt = now(); dlg.close(); commit();
+});
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const title = form.title.value.trim(); if (!title) return;
+  const t = editing ? Object.assign({}, state.tasks.find(x => x.id === editing)) : { id: uid(), createdAt: now(), order: now() };
+  Object.assign(t, { title, desc: form.desc.value, assignee: form.assignee.value.trim(), due: form.due.value || null });
+  let status = form.status.value, sprintId = form.sprintId.value || null;
+  if (!sprintId && status !== 'done') status = 'backlog';
+  if (status === 'backlog') sprintId = null;
+  t.sprintId = sprintId;
+  if (t.status !== status) setStatus(t, status); else upsertTask(t);
+  dlg.close(); commit();
+});
+
+function updatePeople(){
+  const names = [...new Set(liveTasks().map(t => t.assignee).filter(Boolean).concat(tgUserName ? [tgUserName] : []))].sort();
+  $('#peopleList').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+}
+
+render();
+Sync.start();
+})();
+</script>
+</body>
+</html>
