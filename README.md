@@ -28,6 +28,8 @@ GitHub Pages отдаёт только статические файлы, поэ
 
 ⚠️ anon key виден в коде страницы. Защита держится на неочевидном ID доски, поэтому не используйте `main`, если репозиторий публичный.
 
+В этом репозитории уже подключён проект Supabase `vqojsveznhsjzajzxjqg`, доска `mendal-5edc18e97db5`.
+
 ## 3. Telegram-бот
 1. В @BotFather: `/newbot` → получите бота.
 2. `/mybots` → ваш бот → Bot Settings → Menu Button → укажите URL GitHub Pages и название кнопки «Трекер».

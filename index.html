@@ -11,9 +11,9 @@
    Пусто = данные хранятся только в этом браузере (localStorage).
    То же самое можно ввести в «Настройки → Синхронизация» (только для этого устройства). */
 window.TRACKER_CONFIG = {
-  supabaseUrl: "",      // например "https://abcd1234.supabase.co"
-  supabaseKey: "",      // anon public key из Project Settings → API
-  boardId: "main"       // имя доски; одинаковое на всех устройствах
+  supabaseUrl: "https://vqojsveznhsjzajzxjqg.supabase.co",      // например "https://abcd1234.supabase.co"
+  supabaseKey: "sb_publishable_NpFK51zIk-ifX6SajGWcrA_U9zn1_Bt",      // anon public key из Project Settings → API
+  boardId: "mendal-5edc18e97db5"       // имя доски; одинаковое на всех устройствах
 };
 </script>
 <style>
@@ -232,7 +232,7 @@ const Sync = (() => {
     c.supabaseUrl = (c.supabaseUrl||'').replace(/\/+$/,'');
     return (c.supabaseUrl && c.supabaseKey) ? c : null;
   }
-  const headers = () => ({ apikey: conf.supabaseKey, Authorization: 'Bearer ' + conf.supabaseKey, 'Content-Type':'application/json' });
+  const headers = () => Object.assign({ apikey: conf.supabaseKey, 'Content-Type':'application/json' }, conf.supabaseKey.startsWith('eyJ') ? { Authorization: 'Bearer ' + conf.supabaseKey } : {});
   async function fetchRemote(){
     const r = await fetch(`${conf.supabaseUrl}/rest/v1/boards?id=eq.${encodeURIComponent(conf.boardId||'main')}&select=data`, { headers: headers() });
     if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0,120));
