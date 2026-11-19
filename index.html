@@ -568,13 +568,47 @@ function bind(app){
     try {
       const data = JSON.parse(await f.text());
       if (!Array.isArray(data.tasks)) throw new Error('Неверный формат');
-      if (!confirm('Импорт объединит файл с текущими данными. Продолжить?')) return;
-      const stamp = now();
-      data.tasks.forEach(t => t.updatedAt = Math.max(t.updatedAt||0, stamp));
-      (data.sprints||[]).forEach(s => s.updatedAt = Math.max(s.updatedAt||0, stamp));
-      state = mergeState(state, data); commit();
+      const nNew = data.tasks.filter(t => !state.tasks.some(x => x.id === t.id)).length;
+      if (!confirm(`Импорт: задач в файле ${data.tasks.length}, новых ${nNew}. Данные объединятся с текущими. Продолжить?`)) return;
+      importData(data); commit();
     } catch(e){ alertMsg('Не удалось импортировать: ' + e.message); }
   });
+}
+
+// Импорт с объединением: спринты и категории сопоставляются по названию, чтобы не было дублей
+function importData(data){
+  const stamp = now();
+  const tasks = data.tasks.map(t => Object.assign({}, t, { updatedAt: Math.max(t.updatedAt||0, stamp) }));
+  // категории
+  const catList = (data.categories || (data.settings && data.settings.categories) || []);
+  if (catList.length){
+    const cur = cats().slice(), remap = {};
+    for (const c of catList){
+      const ex = cur.find(x => norm(x.name) === norm(c.name));
+      if (ex) remap[c.id] = ex.id; else { cur.push({ id: c.id || uid(), name: c.name, color: c.color || '#5f6368' }); remap[c.id] = c.id; }
+    }
+    tasks.forEach(t => { if (t.category && remap[t.category]) t.category = remap[t.category]; });
+    state.settings = Object.assign({}, state.settings, { categories: cur, updatedAt: stamp });
+  }
+  // исполнители
+  if (Array.isArray(data.people) && data.people.length){
+    const ps = people().slice();
+    for (const n of data.people) if (!ps.some(x => norm(x) === norm(n))) ps.push(n);
+    state.settings = Object.assign({}, state.settings, { people: ps, updatedAt: stamp });
+  }
+  // спринты
+  for (const s of (data.sprints || [])){
+    const ex = liveSprints().find(x => x.id === s.id || norm(x.name) === norm(s.name));
+    if (ex){
+      tasks.forEach(t => { if (t.sprintId === s.id) t.sprintId = ex.id; });
+      if (s.start && s.end && (ex.start !== s.start || ex.end !== s.end)){ ex.start = s.start; ex.end = s.end; ex.updatedAt = stamp; }
+    } else {
+      const ns = Object.assign({}, s, { updatedAt: stamp });
+      if (ns.status === 'active' && activeSprint()) ns.status = 'planned';
+      state.sprints.push(ns);
+    }
+  }
+  state.tasks = mergeList(state.tasks, tasks);
 }
 
 function alertMsg(m){ if (tg && tg.showAlert) tg.showAlert(m); else alert(m); }
