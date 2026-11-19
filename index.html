@@ -60,6 +60,14 @@ main{padding:12px 16px 40px}
 .chip.late{background:#fde8e7;color:var(--danger)}
 .chip.soon{background:#fef0e1;color:var(--warn)}
 @media (prefers-color-scheme: dark){.chip.late{background:#4a1f1c}.chip.soon{background:#4a3218}}
+.chip.cat{color:#fff}
+.filters{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;margin-bottom:12px}
+.seg{display:flex;flex-wrap:wrap;gap:4px}
+.seg button{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:4px 12px;cursor:pointer;font-size:14px}
+.seg button.on{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.filters select{width:auto;min-width:150px;padding:5px 8px}
+.catrow{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+.catrow input[type=color]{width:42px;height:36px;padding:2px}
 .card .mv{margin-left:auto;display:flex;gap:2px}
 .card .mv button{border:0;background:var(--col);border-radius:6px;width:26px;height:22px;cursor:pointer;color:var(--muted)}
 .addcard{margin-top:8px;border:0;background:transparent;color:var(--muted);text-align:left;padding:6px;border-radius:6px;cursor:pointer}
@@ -114,7 +122,10 @@ dialog h3{margin:0 0 12px}
     <div class="row"><label class="f">Название<input name="title" required maxlength="200"></label></div>
     <div class="row"><label class="f">Описание<textarea name="desc"></textarea></label></div>
     <div class="row">
-      <label class="f">Исполнитель<input name="assignee" list="peopleList" maxlength="80"></label>
+      <label class="f">Исполнитель<select name="assignee"></select></label>
+      <label class="f">Категория<select name="category"></select></label>
+    </div>
+    <div class="row">
       <label class="f">Срок<input name="due" type="date"></label>
     </div>
     <div class="row">
@@ -132,7 +143,6 @@ dialog h3{margin:0 0 12px}
     </div>
   </form>
 </dialog>
-<datalist id="peopleList"></datalist>
 
 <script>
 (() => {
@@ -146,6 +156,14 @@ const STATUS_NAME = Object.fromEntries(COLS.map(c=>[c.id,c.name]));
 const LS_DATA = 'tasktracker.data.v1';
 const LS_CONF = 'tasktracker.sync.v1';
 const LS_VIEW = 'tasktracker.view';
+const LS_FILTER = 'tasktracker.filter';
+const DEFAULT_PEOPLE = ['Василий','Соня','Паша'];
+const DEFAULT_CATS = [
+  {id:'dev', name:'Разработка', color:'#2f6fed'},
+  {id:'design', name:'Дизайн', color:'#a142f4'},
+  {id:'bug', name:'Баг', color:'#d93025'},
+  {id:'other', name:'Прочее', color:'#5f6368'}
+];
 
 const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
 if (tg) {
@@ -188,6 +206,32 @@ const liveTasks = () => state.tasks.filter(t => !t.deleted);
 const liveSprints = () => state.sprints.filter(s => !s.deleted);
 const activeSprint = () => liveSprints().find(s => s.status === 'active') || null;
 const sprintById = id => state.sprints.find(s => s.id === id);
+const people = () => (state.settings.people && state.settings.people.length) ? state.settings.people : DEFAULT_PEOPLE;
+const cats = () => state.settings.categories || DEFAULT_CATS;
+const catById = id => cats().find(c => c.id === id);
+const norm = s => String(s || '').trim().toLowerCase();
+
+// фильтр хранится на устройстве (у каждого свой)
+let filter = (() => { try { return Object.assign({assignee:'', category:''}, JSON.parse(localStorage.getItem(LS_FILTER)) || {}); } catch(e){ return {assignee:'', category:''}; } })();
+function setFilter(k, v){ filter[k] = v; try { localStorage.setItem(LS_FILTER, JSON.stringify(filter)); } catch(e){} render(); }
+function passFilter(t){
+  if (filter.assignee === '_none' ? !!t.assignee : (filter.assignee && norm(t.assignee) !== norm(filter.assignee))) return false;
+  if (filter.category === '_none' ? !!t.category : (filter.category && t.category !== filter.category)) return false;
+  return true;
+}
+function filtersHTML(){
+  const ps = people();
+  return `<div class="filters">
+    <div class="seg" role="group" aria-label="Исполнитель">
+      <button data-fa="" class="${!filter.assignee?'on':''}">Все</button>
+      ${ps.map(n => `<button data-fa="${esc(n)}" class="${norm(filter.assignee)===norm(n)?'on':''}">${esc(n)}</button>`).join('')}
+      <button data-fa="_none" class="${filter.assignee==='_none'?'on':''}">Без исполнителя</button>
+    </div>
+    <select id="fCat" aria-label="Категория"><option value="">Все категории</option>
+      ${cats().map(c => `<option value="${c.id}" ${filter.category===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}
+      <option value="_none" ${filter.category==='_none'?'selected':''}>Без категории</option></select>
+  </div>`;
+}
 
 function commit(){ saveLocal(); render(); Sync.push(); }
 
@@ -302,7 +346,6 @@ function render(){
   else if (view === 'done') app.innerHTML = renderDone();
   else app.innerHTML = renderSettings();
   bind(app);
-  updatePeople();
   Sync.status();
 }
 
@@ -318,6 +361,7 @@ function cardHTML(t){
   return `<div class="card" draggable="true" data-id="${t.id}">
     <div class="t">${esc(t.title)}</div>
     <div class="meta">
+      ${catById(t.category) ? `<span class="chip cat" style="background:${catById(t.category).color}">${esc(catById(t.category).name)}</span>` : ''}
       ${t.assignee ? `<span class="chip">👤 ${esc(t.assignee)}</span>` : ''}
       ${dueChip(t)}
       ${t.desc ? '<span title="Есть описание">≡</span>' : ''}
@@ -331,7 +375,7 @@ function cardHTML(t){
 
 function renderBoard(){
   const a = activeSprint();
-  const tasks = liveTasks();
+  const tasks = liveTasks().filter(passFilter);
   const byCol = {backlog:[], todo:[], progress:[], done:[]};
   for (const t of tasks){
     if (t.status === 'backlog' || !t.sprintId) { if (t.status !== 'done') byCol.backlog.push(t); continue; }
@@ -355,7 +399,7 @@ function renderBoard(){
       <button class="btn small primary" data-act="quick-sprint">Начать спринт</button>
       <span class="hint">Без спринта задачи из To Do/In Progress/Done не показываются на доске.</span></div>`;
   }
-  return bar + `<div class="board">${COLS.map(c => `
+  return filtersHTML() + bar + `<div class="board">${COLS.map(c => `
     <section class="column" data-col="${c.id}">
       <h2><span>${c.name}</span><span>${byCol[c.id].length}</span></h2>
       <div class="cards">${byCol[c.id].map(cardHTML).join('') || '<div class="empty">Пусто</div>'}</div>
@@ -365,7 +409,7 @@ function renderBoard(){
 
 let doneFilter = { q:'', sprint:'' };
 function renderDone(){
-  let list = liveTasks().filter(t => t.status === 'done');
+  let list = liveTasks().filter(t => t.status === 'done' && passFilter(t));
   const q = doneFilter.q.trim().toLowerCase();
   if (q) list = list.filter(t => (t.title+' '+(t.desc||'')+' '+(t.assignee||'')).toLowerCase().includes(q));
   if (doneFilter.sprint) list = list.filter(t => (t.sprintId||'') === (doneFilter.sprint === '_none' ? '' : doneFilter.sprint));
@@ -373,7 +417,7 @@ function renderDone(){
   const groups = new Map();
   for (const t of list){ const k = t.sprintId || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
   const sprints = liveSprints().slice().sort((a,b) => b.start.localeCompare(a.start));
-  let html = `<div class="row">
+  let html = filtersHTML() + `<div class="row">
     <label class="f">Поиск<input id="doneQ" value="${esc(doneFilter.q)}" placeholder="Название, описание, исполнитель"></label>
     <label class="f">Спринт<select id="doneSprint"><option value="">Все</option>
       ${sprints.map(s => `<option value="${s.id}" ${doneFilter.sprint===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
@@ -383,8 +427,8 @@ function renderDone(){
   for (const [sid, items] of groups){
     const s = sprintById(sid);
     html += `<div class="group-h">${s ? esc(s.name) + ` · ${fmtDate(s.start)} – ${fmtDate(s.end)}` : 'Без спринта'}</div>
-    <div class="panel" style="padding:4px 10px"><table><thead><tr><th>Задача</th><th class="hide-sm">Исполнитель</th><th class="hide-sm">Срок</th><th>Завершена</th></tr></thead><tbody>
-    ${items.map(t => `<tr class="click" data-open="${t.id}"><td>${esc(t.title)}</td><td class="hide-sm">${esc(t.assignee||'—')}</td><td class="hide-sm">${t.due?fmtDate(t.due):'—'}</td><td>${fmtTs(t.doneAt)}</td></tr>`).join('')}
+    <div class="panel" style="padding:4px 10px"><table><thead><tr><th>Задача</th><th class="hide-sm">Исполнитель · категория</th><th class="hide-sm">Срок</th><th>Завершена</th></tr></thead><tbody>
+    ${items.map(t => `<tr class="click" data-open="${t.id}"><td>${esc(t.title)}</td><td class="hide-sm">${esc(t.assignee||'—')}${catById(t.category) ? ` · ${esc(catById(t.category).name)}` : ''}</td><td class="hide-sm">${t.due?fmtDate(t.due):'—'}</td><td>${fmtTs(t.doneAt)}</td></tr>`).join('')}
     </tbody></table></div>`;
   }
   return html;
@@ -432,6 +476,17 @@ function renderSettings(){
       </td></tr>`).join('')}</tbody></table>
       <div class="row" style="margin-top:8px"><button class="btn" data-act="save-sprints">Сохранить изменения</button></div>` : '<p class="empty">Спринтов пока нет.</p>'}
     <div class="hint">При завершении спринта незавершённые задачи переносятся в следующий запланированный спринт или в бэклог (на выбор). Выполненные остаются в архиве «Завершённые».</div>
+  </div>
+  <div class="panel"><h3>Команда</h3>
+    <label class="f">Исполнители, по одному в строке<textarea id="stPeople" style="min-height:90px">${esc(people().join('\n'))}</textarea></label>
+    <div class="row" style="margin-top:8px"><button class="btn" data-act="save-people">Сохранить</button></div>
+  </div>
+  <div class="panel"><h3>Категории задач</h3>
+    <div id="catList">${cats().map(c => `<div class="catrow" data-cid="${c.id}">
+      <input type="color" value="${c.color}" data-ccolor><input value="${esc(c.name)}" data-cname maxlength="40">
+      <button class="btn small danger" data-cdel title="Удалить">✕</button></div>`).join('')}</div>
+    <div class="row" style="margin-top:8px"><button class="btn" data-act="add-cat">+ Категория</button><button class="btn primary" data-act="save-cats">Сохранить</button></div>
+    <div class="hint">У задач удалённой категории категория просто пропадёт, сами задачи останутся.</div>
   </div>
   <div class="panel"><h3>Синхронизация</h3>
     <div class="hint" style="margin-bottom:8px">${conf ? 'Подключено к Supabase, доска «' + esc(conf.boardId||'main') + '».' : 'Сейчас данные хранятся только в этом браузере.'}
@@ -490,6 +545,10 @@ function bind(app){
   const ds = $('#doneSprint', app);
   if (ds) ds.addEventListener('change', () => { doneFilter.sprint = ds.value; render(); });
 
+  app.querySelectorAll('[data-fa]').forEach(b => b.addEventListener('click', () => setFilter('assignee', b.dataset.fa)));
+  const fc = $('#fCat', app);
+  if (fc) fc.addEventListener('change', () => setFilter('category', fc.value));
+  app.querySelectorAll('[data-cdel]').forEach(b => b.addEventListener('click', () => b.closest('.catrow').remove()));
   app.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => actions[b.dataset.act]()));
   app.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => {
     const s = sprintById(b.dataset.start); s.status = 'active'; s.updatedAt = now(); commit();
@@ -546,6 +605,27 @@ const actions = {
     if (toNext){ next.status = 'active'; next.updatedAt = now(); }
     commit();
   },
+  'save-people'(){
+    const list = [...new Set($('#stPeople').value.split('\n').map(x => x.trim()).filter(Boolean))];
+    if (!list.length){ alertMsg('Добавьте хотя бы одного исполнителя.'); return; }
+    state.settings = Object.assign({}, state.settings, { people: list, updatedAt: now() });
+    if (filter.assignee && filter.assignee !== '_none' && !list.some(n => norm(n) === norm(filter.assignee))) filter.assignee = '';
+    commit();
+  },
+  'add-cat'(){
+    const row = document.createElement('div'); row.className = 'catrow'; row.dataset.cid = uid();
+    row.innerHTML = '<input type="color" value="#1e8e3e" data-ccolor><input value="" data-cname maxlength="40" placeholder="Название"><button class="btn small danger" data-cdel title="Удалить">✕</button>';
+    row.querySelector('[data-cdel]').addEventListener('click', () => row.remove());
+    $('#catList').appendChild(row); row.querySelector('[data-cname]').focus();
+  },
+  'save-cats'(){
+    const list = [...document.querySelectorAll('#catList .catrow')].map(r => ({
+      id: r.dataset.cid, name: r.querySelector('[data-cname]').value.trim(), color: r.querySelector('[data-ccolor]').value
+    })).filter(c => c.name);
+    state.settings = Object.assign({}, state.settings, { categories: list, updatedAt: now() });
+    if (filter.category && filter.category !== '_none' && !list.some(c => c.id === filter.category)) filter.category = '';
+    commit();
+  },
   'save-days'(){
     const v = Math.max(1, Math.min(90, parseInt($('#sprintDays').value, 10) || 14));
     state.settings = Object.assign({}, state.settings, { sprintDays: v, updatedAt: now() }); commit();
@@ -591,9 +671,16 @@ function openTask(id, status){
       .sort((x,y) => x.start.localeCompare(y.start))
       .map(s => `<option value="${s.id}">${esc(s.name)}${s.status==='active'?' (активный)':s.status==='closed'?' (завершён)':''}</option>`));
   form.sprintId.innerHTML = opts.join('');
+  const cur = t ? (t.assignee || '') : (filter.assignee && filter.assignee !== '_none' ? filter.assignee : '');
+  const ps = people().slice();
+  if (cur && !ps.some(n => norm(n) === norm(cur))) ps.push(cur);
+  form.assignee.innerHTML = '<option value="">— не назначен —</option>' + ps.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  form.assignee.value = ps.find(n => norm(n) === norm(cur)) || '';
+  const curCat = t ? (t.category || '') : (filter.category && filter.category !== '_none' ? filter.category : '');
+  form.category.innerHTML = '<option value="">— без категории —</option>' + cats().map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  form.category.value = catById(curCat) ? curCat : '';
   form.title.value = t ? t.title : '';
   form.desc.value = t ? (t.desc||'') : '';
-  form.assignee.value = t ? (t.assignee||'') : (tgUserName || '');
   form.due.value = t ? (t.due||'') : '';
   form.status.value = t ? t.status : (status || 'backlog');
   form.sprintId.value = t ? (t.sprintId||'') : (status && status !== 'backlog' && a ? a.id : '');
@@ -621,7 +708,7 @@ form.addEventListener('submit', e => {
   e.preventDefault();
   const title = form.title.value.trim(); if (!title) return;
   const t = editing ? Object.assign({}, state.tasks.find(x => x.id === editing)) : { id: uid(), createdAt: now(), order: now() };
-  Object.assign(t, { title, desc: form.desc.value, assignee: form.assignee.value.trim(), due: form.due.value || null });
+  Object.assign(t, { title, desc: form.desc.value, assignee: form.assignee.value.trim(), category: form.category.value || null, due: form.due.value || null });
   let status = form.status.value, sprintId = form.sprintId.value || null;
   if (!sprintId && status !== 'done') status = 'backlog';
   if (status === 'backlog') sprintId = null;
@@ -630,10 +717,6 @@ form.addEventListener('submit', e => {
   dlg.close(); commit();
 });
 
-function updatePeople(){
-  const names = [...new Set(liveTasks().map(t => t.assignee).filter(Boolean).concat(tgUserName ? [tgUserName] : []))].sort();
-  $('#peopleList').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
-}
 
 render();
 Sync.start();
